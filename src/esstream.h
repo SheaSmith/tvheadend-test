@@ -45,6 +45,7 @@ enum streaming_component_type {
   SCT_CAT,     /* MPEG-TS CAT (EMM) data */
   SCT_CA,      /* MPEG-TS ECM data */
   SCT_HBBTV,   /* HBBTV info */
+  SCT_RDS,     /* Radio Data System */
   /* standard codecs */
   SCT_MPEG2VIDEO,
   SCT_MPEG2AUDIO,
@@ -64,7 +65,8 @@ enum streaming_component_type {
   SCT_THEORA,
   SCT_OPUS,
   SCT_FLAC,
-  SCT_LAST = SCT_FLAC
+  SCT_AC4,
+  SCT_LAST = SCT_AC4
 };
 
 #define SCT_MASK(t) (1 << (t))
@@ -76,7 +78,8 @@ enum streaming_component_type {
 #define SCT_ISAUDIO(t) ((t) == SCT_MPEG2AUDIO || (t) == SCT_AC3 || \
 			(t) == SCT_AAC  || (t) == SCT_MP4A || \
 			(t) == SCT_EAC3 || (t) == SCT_VORBIS || \
-			(t) == SCT_OPUS || (t) == SCT_FLAC)
+			(t) == SCT_OPUS || (t) == SCT_FLAC || \
+			(t) == SCT_AC4)
 
 #define SCT_ISAV(t) (SCT_ISVIDEO(t) || SCT_ISAUDIO(t))
 
@@ -104,6 +107,7 @@ struct elementary_info {
   uint8_t es_sri;
   uint8_t es_ext_sri;
   uint16_t es_channels;
+  uint8_t es_rds_uecp; /* RDS via UECP data present */
 
   uint16_t es_composition_id;
   uint16_t es_ancillary_id;

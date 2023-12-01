@@ -94,42 +94,46 @@ static void *_epggrab_internal_thread( void *aux )
 {
   epggrab_module_t *mod;
   int err, confver;
-  struct timespec ts;
+  struct timespec cron_next, current_time;
   time_t t;
 
   confver   = epggrab_conf.int_initial ? -1 /* force first run */ : epggrab_confver;
 
   /* Setup timeout */
-  ts.tv_nsec = 0; 
-  ts.tv_sec  = time(NULL) + 120;
+  clock_gettime(CLOCK_REALTIME, &cron_next);
+  cron_next.tv_nsec = 0;
+  cron_next.tv_sec  += 120;
 
   /* Time for other jobs */
   while (atomic_get(&epggrab_running)) {
     tvh_mutex_lock(&epggrab_mutex);
     err = ETIMEDOUT;
     while (atomic_get(&epggrab_running)) {
-      err = tvh_cond_timedwait_ts(&epggrab_cond, &epggrab_mutex, &ts);
+      err = tvh_cond_timedwait_ts(&epggrab_cond, &epggrab_mutex, &cron_next);
       if (err == ETIMEDOUT) break;
     }
     tvh_mutex_unlock(&epggrab_mutex);
     if (err == ETIMEDOUT) break;
   }
 
-  time(&ts.tv_sec);
+  clock_gettime(CLOCK_REALTIME, &cron_next);
+  cron_next.tv_nsec = 0;
 
   while (atomic_get(&epggrab_running)) {
 
     /* Check for config change */
     tvh_mutex_lock(&epggrab_mutex);
     while (atomic_get(&epggrab_running) && confver == epggrab_confver) {
-      err = tvh_cond_timedwait_ts(&epggrab_cond, &epggrab_mutex, &ts);
+      err = tvh_cond_timedwait_ts(&epggrab_cond, &epggrab_mutex, &cron_next);
       if (err == ETIMEDOUT) break;
     }
     confver    = epggrab_confver;
-    if (!cron_multi_next(epggrab_cron_multi, time(NULL), &t))
-      ts.tv_sec = t;
+
+    clock_gettime(CLOCK_REALTIME, &current_time);
+    if (!cron_multi_next(epggrab_cron_multi, current_time.tv_sec, &t))
+      cron_next.tv_sec = t;
     else
-      ts.tv_sec += 60;
+      cron_next.tv_sec += 60;
     tvh_mutex_unlock(&epggrab_mutex);
 
     /* Run grabber(s) */
@@ -324,8 +328,15 @@ epggrab_class_ota_cron_notify(void *self, const char *lang)
   epggrab_ota_set_cron();
 }
 
+static void
+epggrab_class_ota_genre_translation_notify(void *self, const char *lang)
+{
+  epggrab_ota_set_genre_translation();
+}
+
 CLASS_DOC(epgconf)
 PROP_DOC(cron)
+PROP_DOC(ota_genre_translation)
 
 const idclass_t epggrab_class = {
   .ic_snode      = &epggrab_conf.idnode,
@@ -349,7 +360,11 @@ const idclass_t epggrab_class = {
          .name   = N_("OTA (Over-the-air) Grabber Settings"),
          .number = 3,
       },
-      {}
+      {
+         .name   = N_("OTA (Over-the-air) Genre Translation"),
+         .number = 4,
+      },
+    {}
   },
   .ic_properties = (const property_t[]){
     {
@@ -466,6 +481,21 @@ const idclass_t epggrab_class = {
       .off    = offsetof(epggrab_conf_t, ota_timeout),
       .opts   = PO_EXPERT,
       .group  = 3,
+    },
+    {
+      .type   = PT_STR,
+      .id     = "ota_genre_translation",
+      .name   = N_("Over-the-air Genre Translation"),
+      .desc   = N_("Translate the genre codes received from the broadcaster to another genre code."
+                   "<br>Use the form xxx=yyy, where xxx and yyy are "
+                   "'ETSI EN 300 468' content descriptor values expressed in decimal (0-255). "
+                   "<br>Genre code xxx will be converted to genre code yyy."
+                   "<br>Use a separate line for each genre code to be converted."),
+      .doc    = prop_doc_ota_genre_translation,
+      .off    = offsetof(epggrab_conf_t, ota_genre_translation),
+      .notify = epggrab_class_ota_genre_translation_notify,
+      .opts   = PO_MULTILINE | PO_EXPERT,
+      .group  = 4,
     },
     {}
   }

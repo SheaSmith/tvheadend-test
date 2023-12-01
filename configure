@@ -76,6 +76,7 @@ OPTIONS=(
   "ddci:yes"
   "cclang_threadsan:no"
   "gperftools:no"
+  "execinfo:auto"
 )
 
 #
@@ -151,11 +152,23 @@ if [ ${PLATFORM} = "freebsd" ]; then
     # If we don't have libunwind then fallback to execinfo.
     if ! enabled libunwind
     then
-        check_cc_header execinfo
+        if enabled_or_auto execinfo; then
+            if check_cc_header execinfo; then
+                enable execinfo
+            else
+                die "execinfo.h not found (use --disable-execinfo)"
+           fi
+        fi
     fi
 
 else
-    check_cc_header execinfo
+    if enabled_or_auto execinfo; then
+        if check_cc_header execinfo; then
+            enable execinfo
+        else
+            die "execinfo.h not found (use --disable-execinfo)"
+        fi
+    fi
 fi
 check_cc_option mmx
 check_cc_option sse2
@@ -267,6 +280,42 @@ int test(void)
 }
 '
 
+check_cc_snippet time_ld '
+#define _FILE_OFFSET_BITS 64
+#define _TIME_BITS 64
+#include <assert.h>
+#include <stdio.h>
+#include <time.h>
+#define TEST test
+int test(void)
+{
+  printf("%ld", (time_t)1);
+  return 0;
+}
+' '-Wformat -Werror=format'
+
+check_cc_snippet time_lld '
+#define _FILE_OFFSET_BITS 64
+#define _TIME_BITS 64
+#include <assert.h>
+#include <stdio.h>
+#include <time.h>
+#define TEST test
+int test(void)
+{
+  printf("%lld", (time_t)1);
+  return 0;
+}
+' '-Wformat -Werror=format'
+
+if enabled time_lld; then
+  printf "    ^ using time_t format 'lld'\n"
+elif enabled time_ld; then
+  printf "    ^ using time_t format 'ld'\n"
+else
+  die 'Unable to determine size of "time_t"'
+fi
+
 check_cc_snippet stime '
 #include <time.h>
 #define TEST test
@@ -313,9 +362,19 @@ int test(void)
 }
 '
 
-# a check for the external iconv library
+# a check for the external (gnu)iconv library
 # for build-in libc iconv routines this check should fail
 # note that iconv routines are mandatory
+check_cc_snippet gnu_libiconv '
+#include <gnu-libiconv/iconv.h>
+#define TEST test
+int test(void)
+{
+  iconv_t ic = iconv_open("ASCII", "ASCII");
+  return 0;
+}
+' -liconv
+
 check_cc_snippet libiconv '
 #include <iconv.h>
 #define TEST test
@@ -326,7 +385,9 @@ int test(void)
 }
 ' -liconv
 
-if enabled libiconv; then
+if enabled gnu_libiconv; then
+  printf "    ^ using gnu libiconv library\n"
+elif enabled libiconv; then
   printf "    ^ using external iconv library\n"
 else
   printf "    ^ using build-in glibc iconv routines\n"
@@ -601,6 +662,7 @@ if enabled ffmpeg_static; then
     #check_cc_header nvEncodeAPI || \
     #  die "NVENC library (https://developer.nvidia.com/nvidia-video-codec-sdk) not found"
     enable nvenc
+    enable hwaccels
   else
     disable nvenc
   fi
@@ -629,7 +691,6 @@ else
 
     check_pkg libavfilter   ">=6.47.100"  || has_libav=false
     check_pkg libswresample ">=2.1.100"   && has_resample=true
-    check_pkg libavresample ">=3.0.0"     && has_resample=true
     check_pkg libswscale    ">=4.1.100"   || has_libav=false
     check_pkg libavformat   ">=57.41.100" || has_libav=false
     check_pkg libavcodec    ">=57.48.101" || has_libav=false
@@ -655,7 +716,6 @@ fi
 if enabled_or_auto vaapi; then
   if enabled libav; then
     if check_pkg libva ">=0.38.0"; then
-      check_pkg libva-x11 ">=0.38.0" || die "libva-x11 not found"
       check_pkg libva-drm ">=0.38.0" || die "libva-drm not found"
       enable vaapi
       enable hwaccels

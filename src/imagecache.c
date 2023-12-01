@@ -299,6 +299,8 @@ imagecache_image_fetch ( imagecache_image_t *img )
   tvhpoll_t *efd = NULL;
   http_client_t *hc = NULL;
 
+  urlinit(&url);
+
   lock_assert(&imagecache_lock);
 
   if (img->url == NULL || img->url[0] == '\0')
@@ -314,8 +316,6 @@ imagecache_image_fetch ( imagecache_image_t *img )
 
   /* Fetch (release lock, incase of delays) */
   tvh_mutex_unlock(&imagecache_lock);
-
-  urlinit(&url);
 
   /* Build command */
   tvhdebug(LS_IMAGECACHE, "fetch %s", img->url);
@@ -573,8 +573,8 @@ imagecache_done ( void )
     }
     imagecache_destroy(img, 0);
   }
-  tvh_mutex_unlock(&imagecache_lock);
   SKEL_FREE(imagecache_skel);
+  tvh_mutex_unlock(&imagecache_lock);
 }
 
 
@@ -680,11 +680,11 @@ imagecache_get_id ( const char *url )
   if (!imagecache_conf.enabled && strncasecmp(url, "file://", 7))
     return 0;
 
+  tvh_mutex_lock(&imagecache_lock);
+  
   /* Skeleton */
   SKEL_ALLOC(imagecache_skel);
   imagecache_skel->url = url;
-
-  tvh_mutex_lock(&imagecache_lock);
 
   /* Create/Find */
   i = RB_INSERT_SORTED(&imagecache_by_url, imagecache_skel, url_link, url_cmp);

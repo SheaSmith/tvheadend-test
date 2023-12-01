@@ -88,6 +88,32 @@ tvh_write(int fd, const void *buf, size_t len)
 }
 
 int
+tvh_write_in_chunks(int fd, const void *buf, size_t len, size_t chunkSize)
+{
+  int64_t limit = mclk() + sec2mono(25);
+  ssize_t c;
+  ssize_t towrite;
+
+  while (len) {
+    towrite = (len > chunkSize) ? chunkSize : len;
+    c = write(fd, buf, towrite);
+    if (c < 0) {
+      if (ERRNO_AGAIN(errno)) {
+        if (mclk() > limit)
+          break;
+        tvh_safe_usleep(100);
+        continue;
+      }
+      break;
+    }
+    len -= c;
+    buf += c;
+  }
+
+  return len ? 1 : 0;
+}
+
+int
 tvh_nonblock_write(int fd, const void *buf, size_t len)
 {
   ssize_t c;
@@ -452,8 +478,7 @@ int regex_match_substring_length(tvh_regex_t *regex, unsigned number)
  * Sanitizer helpers to avoid false positives
  */
 #if ENABLE_CCLANG_THREADSAN
-void *blacklisted_memcpy(void *dest, const void *src, size_t n)
-  __attribute__((no_sanitize("thread")))
+void __attribute__((no_sanitize_thread)) *blacklisted_memcpy(void *dest, const void *src, size_t n) 
 {
   uint8_t *d = dest;
   const uint8_t *s = src;
@@ -463,8 +488,7 @@ void *blacklisted_memcpy(void *dest, const void *src, size_t n)
 
 void *dlsym(void *handle, const char *symbol);
 
-int blacklisted_close(int fd)
-  __attribute__((no_sanitize("thread")))
+int __attribute__((no_sanitize_thread)) blacklisted_close(int fd)
 {
   // close(fd); // sanitizer reports errors in close()
   return 0;

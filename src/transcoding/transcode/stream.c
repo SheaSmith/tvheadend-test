@@ -56,7 +56,7 @@ static int
 tvh_stream_setup(TVHStream *self, TVHCodecProfile *profile, tvh_ssc_t *ssc)
 {
     enum AVCodecID icodec_id = streaming_component_type2codec_id(ssc->es_type);
-    AVCodec *icodec = NULL, *ocodec = NULL;
+    const AVCodec *icodec = NULL, *ocodec = NULL;
 
     if (icodec_id == AV_CODEC_ID_NONE) {
         tvh_stream_log(self, LOG_ERR, "unknown decoder id for '%s'",
@@ -71,6 +71,18 @@ tvh_stream_setup(TVHStream *self, TVHCodecProfile *profile, tvh_ssc_t *ssc)
             icodec = avcodec_find_decoder_by_name("h264_mmal");
         } else if (icodec_id == AV_CODEC_ID_MPEG2VIDEO) {
             icodec = avcodec_find_decoder_by_name("mpeg2_mmal");
+        }
+      }
+    }
+#endif
+#if ENABLE_NVENC
+    if (idnode_is_instance(&profile->idnode,
+                           (idclass_t *)&codec_profile_video_class)) {
+      if (tvh_codec_profile_video_get_hwaccel(profile) > 0) {
+        if (icodec_id == AV_CODEC_ID_H264) {
+            icodec = avcodec_find_decoder_by_name("h264_cuvid");
+        } else if (icodec_id == AV_CODEC_ID_HEVC) {
+            icodec = avcodec_find_decoder_by_name("hevc_cuvid");
         }
       }
     }

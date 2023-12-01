@@ -583,10 +583,20 @@ static void
 pass_muxer_write(muxer_t *m, const void *data, size_t size)
 {
   pass_muxer_t *pm = (pass_muxer_t*)m;
+  int ret;
 
   if(pm->pm_error) {
     pm->m_errors++;
-  } else if(tvh_write(pm->pm_fd, data, size)) {
+    return;
+  } 
+  
+  if (pm->m_config.m_output_chunk > 0) {
+    ret = tvh_write_in_chunks(pm->pm_fd, data, size, pm->m_config.m_output_chunk);
+  } else {
+    ret = tvh_write(pm->pm_fd, data, size);
+  }
+
+  if(ret) {
     pm->pm_error = errno;
     if (!MC_IS_EOS_ERROR(errno))
       tvherror(LS_PASS, "%s: Write failed -- %s", pm->pm_filename,
@@ -662,9 +672,10 @@ pass_muxer_write_ts(muxer_t *m, pktbuf_t *pb)
         } else if (pid == DVB_EIT_PID) {
         
           dvb_table_parse(&pm->pm_eit, "-", tsb, l, 1, 0, pass_muxer_eit_cb);
-
+        }
+		
         /* PMT */
-        } else {
+        if (pid == pm->pm_pmt_pid) {
 
           dvb_table_parse(&pm->pm_pmt, "-", tsb, l, 1, 0, pass_muxer_pmt_cb);
 
