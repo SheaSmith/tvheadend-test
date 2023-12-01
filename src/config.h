@@ -75,7 +75,6 @@ typedef struct config {
   char *hdhomerun_ip;
   char *local_ip;
   int local_port;
-  char *hdhomerun_server_username;
   uint32_t hdhomerun_server_tuner_count;
   char *hdhomerun_server_model_name;
   int hdhomerun_server_enable;

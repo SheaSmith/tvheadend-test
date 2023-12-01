@@ -1865,27 +1865,9 @@ page_play_auth(http_connection_t *hc, const char *remain, void *opaque)
 
 
 #if ENABLE_HDHOMERUN_SERVER
-/**
- * Dummy password verify callback for HDHomeRun.  We need this to
- * ensure we can get the aa_auth information for the user in to the
- * access_t since it is not populated by an access_get_by_username.
- * Since the user is configured solely on the server, the "passwd" is
- * always valid.
- *
- * We have the username configured on the server (not the client)
- * since HDHomeRun clients usually do not allow entry of credentials.
- *
- * This is called via the "access_get" call which does IP checking
- * (configured via the Users/IP Blocking Records tab in expert
- * setting).
- */
-static int
-hdhomerun_server_verify_callback(void *aux, const char *passwd)
-{
-  return 1;
-}
-
-
+/*
+ * Get the HDHomerun server name.
+ */ 
 static const char *hdhomerun_get_server_name(void)
 {
   return config.server_name ?: "Tvheadend";
@@ -1902,7 +1884,9 @@ static uint32_t hdhomerun_get_deviceid(void)
   return deviceid;
 }
 
-/// Get the model name, defaulting to a commonly used version.
+/*
+ * Get the model name, defaulting to a commonly used version.
+ */ 
 static const char *hdhomerun_get_model_name(void)
 {
   if (config.hdhomerun_server_model_name && !strempty(config.hdhomerun_server_model_name))
@@ -1913,6 +1897,8 @@ static const char *hdhomerun_get_model_name(void)
 
 
 /**
+ * Check if the request has streaming rights. For almost all HDHomerun clients 
+ * this will require setting up an access rule without a username. but with IP matching.
  * @param fail_log_reason Log this reason if permissions fail.
  * @return Permission for the verified user (caller owns the memory) or NULL.
  */
@@ -1920,23 +1906,22 @@ __attribute__((warn_unused_result))
 static access_t *hdhomerun_verify_user_permission(const http_connection_t *hc,
                                                   const char *fail_log_reason)
 {
-  /* Not explicitly enabled?  Then all calls fail. */
+  // HDHomerun emulation not explicitly enabled?  Then all calls fail. 
   if (!config.hdhomerun_server_enable) {
     tvhwarn(LS_WEBUI, "hdhomerun server not enabled but received request [%s]",
             fail_log_reason?:"");
     return NULL;
   }
 
-  const char *hdhr_user = config.hdhomerun_server_username ?: "";
-  access_t *perm = access_get(hc->hc_peer, hdhr_user, hdhomerun_server_verify_callback, NULL);
+  const char *hdhr_user = hc->hc_username ?: "";
+  access_t *perm = hc->hc_access;
 
   if (access_verify2(perm, ACCESS_STREAMING)) {
-    /* Failed */
+    // Acces verification Failed 
     tvhwarn(LS_WEBUI, "hdhomerun server received request but no streaming permission for user [%s] [%d] [%s]",
             hdhr_user ?: "<none>",
             perm? perm->aa_rights : 0,
             fail_log_reason?:"");
-    access_destroy(perm);
     return NULL;
   } else {
     return perm;
@@ -1947,12 +1932,6 @@ static access_t *hdhomerun_verify_user_permission(const http_connection_t *hc,
 /**
  * Return the discovery information for HDHomeRun to give clients
  * details of how to access the lineup.
- *
- * Our HDHomeRun server implementation uses a server configured
- * username to determine access rather than passing it through the
- * request.  This is because HDHomeRun clients are usually configured
- * with only an IP address and port number and do not offer any input
- * for credentials.
  */
 static int
 hdhomerun_server_discover(http_connection_t *hc, const char *remain, void *opaque)
@@ -1968,16 +1947,14 @@ hdhomerun_server_discover(http_connection_t *hc, const char *remain, void *opaqu
 
   tcp_get_str_from_ip(hc->hc_self, http_ip, sizeof(http_ip));
 
-  /* The contents below for the discovery message are based on tvhProxy */
+  // The contents below for the discovery message are based on jkaberg/tvhProxy 
   htsmsg_t *msg = htsmsg_create_map();
   htsmsg_add_str(msg, "FriendlyName", server_name);
   htsmsg_add_str(msg,"FirmwareVersion", tvheadend_version);
-  // Currently hardcoded until we encounter a client that has a
-  // problem.
+  // Currently hardcoded until we encounter a client that has a problem.
   htsmsg_add_str(msg, "FirmwareName", "hdhomerun_atsc");
-  /* We use same value for model name/number to avoid too many user
-   * configuration options.
-   */
+  // We use same value for model name/number to avoid too many user
+  // configuration options.
   htsmsg_add_str(msg, "ModelNumber", hdhomerun_get_model_name());
   htsmsg_add_str(msg, "Manufacturer", "Tvheadend");
   // Random string, but has to be fixed length.
@@ -1996,7 +1973,6 @@ hdhomerun_server_discover(http_connection_t *hc, const char *remain, void *opaqu
   htsbuf_append_str(hq, json);
   free(json);
   http_output_content(hc, "application/json");
-  access_destroy(perm);
   return 0;
 }
 
@@ -2020,11 +1996,10 @@ hdhomerun_server_lineup(http_connection_t *hc, const char *remain, void *opaque)
   char buf1[128], chnum[32], ubuf[UUID_HEX_SIZE];
   char url[1024];
   char http_ip[128];
-  /* We use the UI flags to determine if we should include channel
-   * numbers/sources in the name.  This can help distinguish channels
-   * when you have multiple different sources of the same channel such
-   * as satellite and aerial.
-   */
+  // We use the UI flags to determine if we should include channel
+  // numbers/sources in the name.  This can help distinguish channels
+  // when you have multiple different sources of the same channel such
+  // as satellite and aerial.
   const int flags =
     (config.chname_num ? CHANNEL_ENAME_NUMBERS : 0) |
     (config.chname_src ? CHANNEL_ENAME_SOURCES : 0);
@@ -2043,7 +2018,7 @@ hdhomerun_server_lineup(http_connection_t *hc, const char *remain, void *opaque)
     htsbuf_append_str(hq, "{ \"GuideName\" : ");
     htsbuf_append_and_escape_jsonstr(hq, name);
     htsbuf_append_str(hq, ", \"GuideNumber\" : ");
-    /* channel_get_number_as_str returns NULL if no channel number! */
+    // channel_get_number_as_str returns NULL if no channel number!
     chnum_str = channel_get_number_as_str(ch, chnum, sizeof(chnum));
     htsbuf_append_and_escape_jsonstr(hq, chnum_str ? chnum_str : "0");
     htsbuf_append_str(hq, ", \"URL\" : ");
@@ -2060,7 +2035,6 @@ hdhomerun_server_lineup(http_connection_t *hc, const char *remain, void *opaque)
   tvh_mutex_unlock(&global_lock);
   htsbuf_append_str(hq, "]");
   http_output_content(hc, "application/json");
-  access_destroy(perm);
   return 0;
 }
 
@@ -2073,16 +2047,16 @@ hdhomerun_server_lineup_status(http_connection_t *hc, const char *remain, void *
     return http_noaccess_code(hc);
 
   htsbuf_queue_t *hq = &hc->hc_reply;
-  /* The contents below for the discovery message are based on the forum. */
+  // The contents below for the status message are based on jkaberg/tvhProxy.
   htsbuf_append_str(hq, "{\"ScanInProgress\":0,\"ScanPossible\":0,\"Source\":\"Antenna\",\"SourceList\":[\"Antenna\"]}");
   http_output_content(hc, "application/json");
-  access_destroy(perm);
   return 0;
 }
 
 
 
-/** Some media players ignore the "scan not possible" and do a post to
+/**
+ * Some media players ignore the "scan not possible" and do a post to
  * this function with "?scan=start".
  *
  * We currently ignore this request and just return success.
@@ -2100,7 +2074,6 @@ hdhomerun_server_lineup_post(http_connection_t *hc, const char *remain, void *op
   // empty json document.
   htsbuf_append_str(&hc->hc_reply, "{}");
   http_output_content(hc, "application/json");
-  access_destroy(perm);
   return 0;
 }
 
@@ -2117,7 +2090,7 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
 
   const char *server_name = hdhomerun_get_server_name();
   const char *model_name = hdhomerun_get_model_name();
-  /* Need to escape strings in xml */
+  // Need to escape strings in xml 
   char server_name_escaped[128];
   char model_name_escaped[128];
   char http_ip[128];
@@ -2127,6 +2100,7 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
   html_escape(server_name_escaped, server_name, sizeof(server_name_escaped));
   html_escape(model_name_escaped, model_name, sizeof(model_name_escaped));
 
+  // The contents below for the discovery message are based on jkaberg/tvhProxy 
   tcp_get_str_from_ip(hc->hc_self, http_ip, sizeof(http_ip));
   htsbuf_qprintf(hq, "<root xmlns=\"urn:schemas-upnp-org:device-1-0\">"
                  "<specVersion>"
@@ -2141,7 +2115,7 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
                  "<modelName>%s</modelName>"
                  "<modelNumber>%s</modelNumber>"
                  "<serialNumber></serialNumber>"
-                 /* Version 5 UUID (random) with top part as server id*/
+                 // Version 5 UUID (random) with top part as server id
                  "<UDN>uuid:%8.8x-745e-5d9a-8903-4a02327a7e09</UDN>"
                  "</device>"
                  "</root>",
@@ -2155,7 +2129,6 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
                  deviceid);
 
   http_output_content(hc, "application/xml");
-  access_destroy(perm);
   return 0;
 }
 #endif  /* ENABLE_HDHOMERUN_SERVER */
