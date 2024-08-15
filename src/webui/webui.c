@@ -72,7 +72,6 @@ static int webui_xspf;
 
 #if ENABLE_HDHOMERUN_SERVER
 #define UPNP_MAX_AGE 1800
-static char *http_server_ip;
 static int http_server_port;
 static upnp_service_t *hdhr_server_upnp_discovery;
 #endif
@@ -1954,6 +1953,8 @@ hdhomerun_server_discover(http_connection_t *hc, const char *remain, void *opaqu
   htsbuf_queue_t *hq = &hc->hc_reply;
   const char *server_name = hdhomerun_get_server_name();
   const uint32_t deviceid = hdhomerun_get_deviceid();
+  char http_ip[128];
+  tcp_get_str_from_ip(hc->hc_self, http_ip, sizeof(http_ip));
 
 
   // The contents below for the discovery message are based on jkaberg/tvhProxy 
@@ -1968,9 +1969,9 @@ hdhomerun_server_discover(http_connection_t *hc, const char *remain, void *opaqu
   htsmsg_add_str(msg, "Manufacturer", "Tvheadend");
   // Random string, but has to be fixed length.
   htsmsg_add_str(msg, "DeviceAuth", "3xw5UaJXhVShHEBoy76FuYQi");
-  htsmsg_add_str_printf(msg, "BaseURL", "http://%s:%u", http_server_ip, tvheadend_webui_port);
+  htsmsg_add_str_printf(msg, "BaseURL", "http://%s:%u", http_ip, tvheadend_webui_port);
   htsmsg_add_str_printf(msg, "DeviceID", "%08X", deviceid);
-  htsmsg_add_str_printf(msg, "LineupURL", "http://%s:%u/lineup.json", http_server_ip, tvheadend_webui_port);
+  htsmsg_add_str_printf(msg, "LineupURL", "http://%s:%u/lineup.json", http_ip, tvheadend_webui_port);
 
   // If user has not explicitly set a count then we use a default.
   // The actual number of tuners is unknown since we allow multiplex
@@ -2006,6 +2007,9 @@ hdhomerun_server_lineup(http_connection_t *hc, const char *remain, void *opaque)
   const int use_auth = perm && perm->aa_auth && !strempty(perm->aa_auth);
   char buf1[128], chnum[32], ubuf[UUID_HEX_SIZE];
   char url[1024];
+  char http_ip[128];
+  tcp_get_str_from_ip(hc->hc_self, http_ip, sizeof(http_ip));
+
   // We use the UI flags to determine if we should include channel
   // numbers/sources in the name.  This can help distinguish channels
   // when you have multiple different sources of the same channel such
@@ -2035,7 +2039,7 @@ hdhomerun_server_lineup(http_connection_t *hc, const char *remain, void *opaque)
     htsbuf_append_and_escape_jsonstr(hq, chnum_str ? chnum_str : "0");
     htsbuf_append_str(hq, ", \"URL\" : ");
     sprintf(url, "http://%s:%u/stream/channel/%s?profile=%s%s%s",
-            http_server_ip,
+            http_ip,
             tvheadend_webui_port,
             channel_get_uuid(ch, ubuf),
             pro ? profile_get_name(pro) : "pass",
@@ -2108,6 +2112,8 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
   char model_name_escaped[128];
   htsbuf_queue_t *hq = &hc->hc_reply;
   const uint32_t deviceid = hdhomerun_get_deviceid();
+  char http_ip[128];
+  tcp_get_str_from_ip(hc->hc_self, http_ip, sizeof(http_ip));
 
   html_escape(server_name_escaped, server_name, sizeof(server_name_escaped));
   html_escape(model_name_escaped, model_name, sizeof(model_name_escaped));
@@ -2130,7 +2136,7 @@ hdhomerun_server_device_xml(http_connection_t *hc, const char *remain, void *opa
                  "<UDN>uuid:%8.8x-745e-5d9a-8903-4a02327a7e09</UDN>"
                  "</device>"
                  "</root>",
-                 http_server_ip, tvheadend_webui_port,
+                 http_ip, tvheadend_webui_port,
                  server_name_escaped,
                  // We'll use the same for model name and number to
                  // avoid too much user configuration.  Some clients
@@ -2177,7 +2183,7 @@ USN: uuid:%08X::upnp:rootdevice\r\n"
   }
 
   snprintf(buf, sizeof(buf), MSG, UPNP_MAX_AGE,
-           http_server_ip, tvheadend_webui_port, tvheadend_webroot ?: "",
+           "%s", tvheadend_webui_port, tvheadend_webroot ?: "",
            tvheadend_version,
            hdhomerun_get_deviceid());
 
@@ -2185,7 +2191,8 @@ USN: uuid:%08X::upnp:rootdevice\r\n"
   htsbuf_append_str(&q, buf);
   htsbuf_append(&q, "\r\n", 2);
   storage = *dst;
-  upnp_send(&q, &storage, 0, from_multicast);
+  upnp_send(&q, &storage, 0, from_multicast,1);
+
   htsbuf_queue_flush(&q);
 #undef MSG
 }
@@ -2273,8 +2280,6 @@ hdhr_server_upnp_discovery_received
   if (strcmp(argv[1], "1900"))
     return;
   if (conn->multicast && strcmp(argv[0], "239.255.255.250"))
-    return;
-  if (!conn->multicast && strcmp(argv[0], http_server_ip))
     return;
 
   if (tvhtrace_enabled()) {
@@ -2862,21 +2867,9 @@ webui_init(int xspf)
   http_path_add("/device.xml", NULL, hdhomerun_server_device_xml, ACCESS_ANONYMOUS);
 
   /* Setup SSDP discovery */
-  struct sockaddr_storage http;
-  char http_ip[128];
 
-  if (http_server_ip == NULL) {
-    if (tcp_server_onall(http_server) && *config.local_ip == 0) {
-      tvherror(LS_WEBUI, "Use Local IP config entry to set the local IP for HDHomeRun Emulation");
-    }
-    if (tcp_server_bound(http_server, &http, PF_INET) < 0) {
-      tvherror(LS_WEBUI, "Unable to determine the HTTP/RTSP address");
-      return;
-    }
-    tcp_get_str_from_ip(&http, http_ip, sizeof(http_ip));
-    http_server_ip = strdup(*config.local_ip ? config.local_ip: http_ip);
-    http_server_port = ntohs(IP_PORT(http)); // could also be 
-    http_server_port = http_server_port ?: tvheadend_webui_port;
+  if (http_server_port == 0) {
+    http_server_port = tvheadend_webui_port;
   }
 
   hdhr_server_upnp_discovery = upnp_service_create(upnp_service);
@@ -2922,6 +2915,4 @@ void
 webui_done(void)
 {
   comet_done();
-  free(http_server_ip);
-  http_server_ip = NULL;
 }
