@@ -11,6 +11,18 @@ WORKDIR /src
 
 COPY . /src/
 
+
+RUN apk add --no-cache \
+    gcc \
+    libffi-dev \
+    linux-headers \
+    musl-dev \
+    openssl-dev \
+    python3 \
+    python3-dev py3-pip git
+
+RUN pip3 install -U git+https://github.com/ImAleeexx/streamlink-drm --break-system-packages
+
 RUN apk add --no-cache \
         'avahi-dev' \
         'bash' \
