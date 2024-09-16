@@ -1,4 +1,4 @@
-# TVHeadend in Docker
+# TVHeadend in Docker2
 TVHeadend can be run within a Docker container. This provides isolation from
 other processes by running it in a containerized environment. As this is not
 and in-depth tutorial on docker, those with Docker, containers or cgroups see
